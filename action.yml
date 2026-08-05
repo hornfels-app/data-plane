@@ -31,7 +31,7 @@ runs:
       shell: bash
       # In production this would download a pre-compiled release binary.
       # For testing across repos, we can compile it directly from the source branch.
-      run: GOPROXY=direct go install github.com/hornfels-app/data-plane@latest
+      run: GOPROXY=direct go install github.com/hornfels-app/data-plane/cmd/hornfels@latest
 
     - name: Run Hornfels
       shell: bash
