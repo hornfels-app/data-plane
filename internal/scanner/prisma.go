@@ -30,32 +30,32 @@ func (p *PrismaScanner) ScanSchema(ctx context.Context) ([]Column, error) {
 	content := string(data)
 
 	var columns []Column
-	
+
 	// Extremely simplistic regex for Prisma models
 	// Looks for `model Name { ... }` blocks
 	modelRegex := regexp.MustCompile(`(?s)model\s+([A-Za-z0-9_]+)\s*\{([^}]+)\}`)
 	// Looks for field lines: `fieldName Type @attrs /// [hornfels: pii=X]`
 	fieldRegex := regexp.MustCompile(`(?m)^\s*([A-Za-z0-9_]+)\s+([A-Za-z0-9_?]+)(.*)$`)
-	
+
 	models := modelRegex.FindAllStringSubmatch(content, -1)
 	for _, m := range models {
 		table := m[1]
 		body := m[2]
-		
+
 		lines := strings.Split(body, "\n")
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "///") {
 				continue // skip empties and regular comments, but allow Prisma doc comments (///)
 			}
-			
+
 			// Find field
 			fm := fieldRegex.FindStringSubmatch(line)
 			if len(fm) >= 3 {
 				colName := fm[1]
 				colType := fm[2]
 				rest := fm[3]
-				
+
 				// A proper AST parser would be better, but regex serves MVP well here.
 				columns = append(columns, Column{
 					Table:    table,

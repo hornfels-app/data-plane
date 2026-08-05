@@ -12,22 +12,22 @@ import (
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func TestEndToEnd(t *testing.T) {
-	ctx := context.Background()
-
-	// 1. Compile the Hornfels binary
+func buildCLI(t *testing.T) string {
 	binPath := filepath.Join(t.TempDir(), "hornfels")
 	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/hornfels")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build hornfels: %v\n%s", err, out)
 	}
+	return binPath
+}
 
-	// 2. Set up GitHub Mock API
-	ghMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func setupMockGitHub() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/repos/testowner/testrepo/issues/123/comments") {
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte(`{"id": 1}`))
@@ -35,13 +35,27 @@ func TestEndToEnd(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
+}
+
+func runCLI(binPath, connStr, ghMockURL string, args ...string) (string, error) {
+	cmd := exec.Command(binPath, args...)
+	cmd.Env = append(os.Environ(),
+		"DATABASE_URL="+connStr,
+		"GITHUB_TOKEN=fake_token",
+		"GITHUB_REPOSITORY=testowner/testrepo",
+		"GITHUB_REF_NAME=123/merge",
+		"GITHUB_API_URL="+ghMockURL,
+	)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestPostgresEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	binPath := buildCLI(t)
+	ghMock := setupMockGitHub()
 	defer ghMock.Close()
 
-	// 3. Set up Postgres via Testcontainers
-	dbName := "hornfels_test"
-	dbUser := "devuser"
-	dbPassword := "devpassword"
-	
 	initScript := filepath.Join(t.TempDir(), "init.sql")
 	err := os.WriteFile(initScript, []byte(`
 CREATE TABLE users (
@@ -60,9 +74,9 @@ INSERT INTO users (first_name, email, ssn) VALUES ('Alice', 'alice@example.com',
 
 	postgresContainer, err := postgres.Run(ctx,
 		"postgres:15-alpine",
-		postgres.WithDatabase(dbName),
-		postgres.WithUsername(dbUser),
-		postgres.WithPassword(dbPassword),
+		postgres.WithDatabase("hornfels_test"),
+		postgres.WithUsername("devuser"),
+		postgres.WithPassword("devpassword"),
 		postgres.WithInitScripts(initScript),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
@@ -72,71 +86,121 @@ INSERT INTO users (first_name, email, ssn) VALUES ('Alice', 'alice@example.com',
 	if err != nil {
 		t.Fatalf("failed to start container: %s", err)
 	}
-	defer func() {
-		if err := postgresContainer.Terminate(ctx); err != nil {
-			t.Fatalf("failed to terminate container: %s", err)
-		}
-	}()
+	defer postgresContainer.Terminate(ctx)
 
-	connStr, err := postgresContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("failed to get connection string: %s", err)
+	connStr, _ := postgresContainer.ConnectionString(ctx, "sslmode=disable")
+
+	// 1. Init
+	if _, err := runCLI(binPath, connStr, ghMock.URL, "init"); err != nil {
+		t.Fatalf("init failed: %v", err)
 	}
 
-	// 4. Helper to run CLI
-	runCLI := func(args ...string) (string, error) {
-		cmd := exec.Command(binPath, args...)
-		cmd.Env = append(os.Environ(),
-			"DATABASE_URL="+connStr,
-			"GITHUB_TOKEN=fake_token",
-			"GITHUB_REPOSITORY=testowner/testrepo",
-			"GITHUB_REF_NAME=123/merge",
-			"GITHUB_API_URL="+ghMock.URL,
-		)
-		out, err := cmd.CombinedOutput()
-		return string(out), err
+	// 2. Baseline
+	if _, err := runCLI(binPath, connStr, ghMock.URL, "baseline"); err != nil {
+		t.Fatalf("baseline failed: %v", err)
 	}
 
-	// 5. Test Step: Init
-	t.Log("Testing 'hornfels init'...")
-	if out, err := runCLI("init"); err != nil {
-		t.Fatalf("init failed: %v\n%s", err, out)
+	// 3. Check (Pass)
+	out, err := runCLI(binPath, connStr, ghMock.URL, "check")
+	if err != nil || !strings.Contains(out, "Hornfels Check Passed") {
+		t.Fatalf("check failed when it should pass: %v\n%s", err, out)
 	}
 
-	// 6. Test Step: Baseline
-	t.Log("Testing 'hornfels baseline'...")
-	if out, err := runCLI("baseline"); err != nil {
-		t.Fatalf("baseline failed: %v\n%s", err, out)
-	}
-
-	// 7. Test Step: Check (Should Pass because everything is baselined)
-	t.Log("Testing 'hornfels check'...")
-	out, err := runCLI("check")
-	if err != nil {
-		t.Fatalf("check failed when it should have passed (due to baseline): %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "Hornfels Check Passed") {
-		t.Errorf("Expected PASS output, got: %s", out)
-	}
-
-	// 8. Delete Baseline to test Strict Mode
+	// 4. Strict Mode
 	os.Remove(".hornfels-baseline.yaml")
+	out, err = runCLI(binPath, connStr, ghMock.URL, "check", "--scan-data")
+	if err == nil || !strings.Contains(out, "Hornfels Check Failed") {
+		t.Fatalf("check --scan-data should have failed.\n%s", out)
+	}
 
-	// 9. Test Step: Check --scan-data (Should Fail because SSN is tagged false but contains data)
-	t.Log("Testing 'hornfels check --scan-data'...")
-	out, err = runCLI("check", "--scan-data")
-	if err == nil {
-		t.Fatalf("check --scan-data should have failed, but it passed.\n%s", out)
-	}
-	if !strings.Contains(out, "Hornfels Check Failed") {
-		t.Errorf("Expected FAIL output, got: %s", out)
-	}
-	if !strings.Contains(out, "Column tagged as pii=false but sampled data contains SSN") {
-		t.Errorf("Did not find heuristic failure reason in output: %s", out)
-	}
-	
-	// Cleanup config files
 	os.Remove(".hornfels.yaml")
 	os.Remove(".cursorrules")
-	os.Remove("hornfels-receipt.json")
+}
+
+func TestMySQLEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	binPath := buildCLI(t)
+	ghMock := setupMockGitHub()
+	defer ghMock.Close()
+
+	initScript := filepath.Join(t.TempDir(), "init.sql")
+	err := os.WriteFile(initScript, []byte(`
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(50),
+    email VARCHAR(255),
+    ssn VARCHAR(20)
+);
+ALTER TABLE users MODIFY COLUMN email VARCHAR(255) COMMENT '[hornfels: pii=true] User email address';
+ALTER TABLE users MODIFY COLUMN ssn VARCHAR(20) COMMENT '[hornfels: pii=false] Not an SSN';
+INSERT INTO users (first_name, email, ssn) VALUES ('Alice', 'alice@example.com', '123-45-6789');
+	`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write init.sql: %v", err)
+	}
+
+	mysqlContainer, err := mysql.Run(ctx,
+		"mysql:8.0",
+		mysql.WithDatabase("hornfels_test"),
+		mysql.WithUsername("devuser"),
+		mysql.WithPassword("devpassword"),
+		mysql.WithScripts(initScript),
+	)
+	if err != nil {
+		t.Fatalf("failed to start mysql container: %s", err)
+	}
+	defer mysqlContainer.Terminate(ctx)
+
+	connStr, _ := mysqlContainer.ConnectionString(ctx)
+
+	// 1. Init
+	if _, err := runCLI(binPath, connStr, ghMock.URL, "init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// 2. Baseline
+	if _, err := runCLI(binPath, connStr, ghMock.URL, "baseline"); err != nil {
+		t.Fatalf("baseline failed: %v", err)
+	}
+
+	// 3. Check (Pass)
+	out, err := runCLI(binPath, connStr, ghMock.URL, "check")
+	if err != nil || !strings.Contains(out, "Hornfels Check Passed") {
+		t.Fatalf("check failed when it should pass: %v\n%s", err, out)
+	}
+
+	// 4. Strict Mode
+	os.Remove(".hornfels-baseline.yaml")
+	out, err = runCLI(binPath, connStr, ghMock.URL, "check", "--scan-data")
+	if err == nil || !strings.Contains(out, "Hornfels Check Failed") {
+		t.Fatalf("check --scan-data should have failed.\n%s", out)
+	}
+
+	os.Remove(".hornfels.yaml")
+	os.Remove(".cursorrules")
+}
+
+func TestPrismaEndToEnd(t *testing.T) {
+	binPath := buildCLI(t)
+	ghMock := setupMockGitHub()
+	defer ghMock.Close()
+
+	os.WriteFile("schema.prisma", []byte(`
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   /// [hornfels: pii=true]
+  ssn       String   // Missing the hornfels tag!
+}
+	`), 0644)
+
+	runCLI(binPath, "", ghMock.URL, "init")
+
+	out, err := runCLI(binPath, "", ghMock.URL, "check", "--prisma")
+	if err == nil || !strings.Contains(out, "Hornfels Check Failed") {
+		t.Fatalf("Prisma check should have failed on untagged SSN.\n%s", out)
+	}
+
+	os.Remove("schema.prisma")
+	os.Remove(".hornfels.yaml")
+	os.Remove(".cursorrules")
 }

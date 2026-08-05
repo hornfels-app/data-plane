@@ -92,7 +92,7 @@ func (m *MySQLScanner) SampleData(ctx context.Context, table string) ([]map[stri
 		rowMap := make(map[string]interface{})
 		for i, colName := range cols {
 			val := columnsData[i]
-			
+
 			// MySQL driver often returns []byte for strings
 			b, ok := val.([]byte)
 			if ok {

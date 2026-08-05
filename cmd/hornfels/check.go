@@ -58,7 +58,7 @@ var checkCmd = &cobra.Command{
 		scanData, _ := cmd.Flags().GetBool("scan-data")
 
 		rcpt := &reporter.Receipt{Status: "PASS"}
-		
+
 		for _, col := range cols {
 			// Skip excluded tables (simple logic for now)
 			excluded := false
@@ -81,13 +81,13 @@ var checkCmd = &cobra.Command{
 
 			// Heuristic Check
 			isSuspicious := heuristics.IsSuspiciousColumn(col.Name)
-			
+
 			if cfg.StrictMode && !hasTag {
 				reason := "Column missing [hornfels: pii=true|false] classification."
 				if isSuspicious {
 					reason = "Column name looks like PII but is unclassified."
 				}
-				
+
 				fix := fmt.Sprintf("COMMENT ON COLUMN %s.%s IS '[hornfels: pii=true]';", col.Table, col.Name)
 				rcpt.Violations = append(rcpt.Violations, reporter.Violation{
 					Table: col.Table, Column: col.Name, DataType: col.DataType,
@@ -109,7 +109,7 @@ var checkCmd = &cobra.Command{
 				if foundPII {
 					rcpt.Violations = append(rcpt.Violations, reporter.Violation{
 						Table: col.Table, Column: col.Name, DataType: col.DataType,
-						Reason: "Column tagged as pii=false but sampled data contains SSN/Email/CreditCard.",
+						Reason:      "Column tagged as pii=false but sampled data contains SSN/Email/CreditCard.",
 						ProposedFix: fmt.Sprintf("COMMENT ON COLUMN %s.%s IS '[hornfels: pii=true]';", col.Table, col.Name),
 					})
 				}
@@ -132,7 +132,7 @@ var checkCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(checkCmd)
-	
+
 	// Flags
 	checkCmd.Flags().Bool("scan-data", false, "Sample data to detect unstructured PII")
 	checkCmd.Flags().Bool("prisma", false, "Parse schema.prisma instead of querying the live DB")

@@ -83,14 +83,14 @@ func (p *PostgresScanner) SampleData(ctx context.Context, table string) ([]map[s
 		if err != nil {
 			return nil, err
 		}
-		
+
 		rowMap := make(map[string]interface{})
 		for i, field := range fields {
 			rowMap[field.Name] = values[i]
 		}
 		results = append(results, rowMap)
 	}
-	
+
 	return results, rows.Err()
 }
 
