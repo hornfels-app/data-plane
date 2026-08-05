@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hornfels/hornfels/internal/policy"
-	"github.com/hornfels/hornfels/internal/scanner"
+	"github.com/hornfels-app/data-plane/internal/policy"
+	"github.com/hornfels-app/data-plane/internal/scanner"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

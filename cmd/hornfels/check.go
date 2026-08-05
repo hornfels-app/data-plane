@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hornfels/hornfels/internal/heuristics"
-	"github.com/hornfels/hornfels/internal/policy"
-	"github.com/hornfels/hornfels/internal/reporter"
-	"github.com/hornfels/hornfels/internal/scanner"
+	"github.com/hornfels-app/data-plane/internal/heuristics"
+	"github.com/hornfels-app/data-plane/internal/policy"
+	"github.com/hornfels-app/data-plane/internal/reporter"
+	"github.com/hornfels-app/data-plane/internal/scanner"
 	"github.com/spf13/cobra"
 )
 

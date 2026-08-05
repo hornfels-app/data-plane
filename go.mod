@@ -1,4 +1,4 @@
-module github.com/hornfels/hornfels
+module github.com/hornfels-app/data-plane
 
 go 1.25.12
 
