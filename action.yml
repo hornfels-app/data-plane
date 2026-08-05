@@ -31,7 +31,7 @@ runs:
       shell: bash
       # In production this would download a pre-compiled release binary.
       # For testing across repos, we can compile it directly from the source branch.
-      run: go install github.com/${{ github.action_repository }}@${{ github.action_ref }}
+      run: go install github.com/hornfels-app/data-plane@main
 
     - name: Run Hornfels
       shell: bash
