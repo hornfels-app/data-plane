@@ -1,0 +1,6 @@
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   /// [hornfels: pii=true]
+  ssn       String   // Missing the hornfels tag!
+  createdAt DateTime @default(now()) /// [hornfels: pii=false]
+}

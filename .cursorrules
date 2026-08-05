@@ -1,0 +1,6 @@
+---
+description: Strict constraints to prevent hallucinations and bloat for coding agents working on Hornfels.
+alwaysApply: true
+---
+# Hornfels Rules
+Do not guess schemas. Use hornfels tags.

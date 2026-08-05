@@ -1,0 +1,55 @@
+name: 'Hornfels PII Checker'
+description: 'Stops PII schema leaks in CI/CD by enforcing strict COMMENT ON COLUMN tagging policies.'
+author: 'Hornfels'
+
+inputs:
+  database_url:
+    description: 'The connection string for the database (Postgres or MySQL)'
+    required: false
+  prisma:
+    description: 'Set to "true" to run in Prisma AST mode (offline)'
+    required: false
+    default: 'false'
+  scan_data:
+    description: 'Set to "true" to sample unstructured data for hidden PII'
+    required: false
+    default: 'false'
+  github_token:
+    description: 'GITHUB_TOKEN for posting PR comments'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: Install Hornfels
+      shell: bash
+      # In production this would download a pre-compiled release binary.
+      # For testing across repos, we can compile it directly from the source branch.
+      run: go install github.com/${{ github.action_repository }}@${{ github.action_ref }}
+
+    - name: Run Hornfels
+      shell: bash
+      env:
+        DATABASE_URL: ${{ inputs.database_url }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        ARGS=""
+        if [ "${{ inputs.prisma }}" = "true" ]; then
+          ARGS="--prisma"
+        fi
+        if [ "${{ inputs.scan_data }}" = "true" ]; then
+          ARGS="$ARGS --scan-data"
+        fi
+        
+        # If config doesn't exist, init it to prevent immediate crashes on new setups
+        if [ ! -f ".hornfels.yaml" ]; then
+          hornfels init
+        fi
+        
+        hornfels check $ARGS

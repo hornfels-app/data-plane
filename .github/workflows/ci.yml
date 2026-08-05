@@ -1,0 +1,121 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Run E2E Go Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build
+      run: go build -o hornfels cmd/hornfels/*.go
+
+    - name: Test internal packages
+      run: go test -v ./internal/...
+
+    - name: Run E2E Test (Testcontainers)
+      run: go test -v e2e_test.go
+
+  manual-db-test:
+    name: Hornfels Matrix DB Testing
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [postgres, mysql]
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: devuser
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: hornfels_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: hornfels_test
+          MYSQL_USER: devuser
+          MYSQL_PASSWORD: devpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build Binary
+      run: go build -o hornfels cmd/hornfels/*.go
+
+    - name: Run Postgres Test
+      if: matrix.database == 'postgres'
+      env:
+        DATABASE_URL: postgres://devuser:devpassword@localhost:5432/hornfels_test?sslmode=disable
+      run: |
+        ./hornfels init
+        # Normally you would import a schema here, then check
+        ./hornfels baseline
+        ./hornfels check
+
+    - name: Run MySQL Test
+      if: matrix.database == 'mysql'
+      env:
+        DATABASE_URL: devuser:devpassword@tcp(localhost:3306)/hornfels_test
+      run: |
+        ./hornfels init
+        ./hornfels baseline
+        ./hornfels check
+
+  prisma-test:
+    name: Hornfels Prisma AST Testing
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build Binary
+      run: go build -o hornfels cmd/hornfels/*.go
+      
+    - name: Run Prisma Test
+      run: |
+        ./hornfels init
+        cat << 'EOF' > schema.prisma
+        model User {
+          id        Int      @id @default(autoincrement())
+          email     String   /// [hornfels: pii=true]
+          createdAt DateTime @default(now()) /// [hornfels: pii=false]
+        }
+        EOF
+        ./hornfels check --prisma
