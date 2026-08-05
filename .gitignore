@@ -1,3 +1,24 @@
+# Binaries
 hornfels
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Project specific
 hornfels-receipt.json
+.hornfels.yaml
 .hornfels-baseline.yaml
+.cursorrules
+
+# Docker
+docker-compose.yml
+init.sql
+schema.prisma
